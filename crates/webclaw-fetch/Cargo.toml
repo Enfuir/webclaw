@@ -1,0 +1,24 @@
+[package]
+name = "webclaw-fetch"
+description = "HTTP client with browser TLS fingerprint impersonation via Impit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+webclaw-core = { workspace = true }
+webclaw-pdf = { path = "../webclaw-pdf" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+primp = { git = "https://github.com/deedy5/primp", default-features = false, features = [
+    "default-tls", "http2", "impersonate", "cookies", "gzip", "brotli", "deflate", "zstd", "socks",
+] }
+url = "2"
+rand = "0.8"
+quick-xml = { version = "0.37", features = ["serde"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

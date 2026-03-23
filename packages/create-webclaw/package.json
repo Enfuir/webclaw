@@ -1,0 +1,32 @@
+{
+  "name": "create-webclaw",
+  "version": "0.1.0",
+  "description": "Set up webclaw MCP server for AI agents (Claude, Cursor, Windsurf, OpenCode, Codex, Antigravity)",
+  "bin": {
+    "create-webclaw": "./index.mjs"
+  },
+  "type": "module",
+  "keywords": [
+    "webclaw",
+    "mcp",
+    "ai",
+    "scraping",
+    "claude",
+    "cursor",
+    "windsurf",
+    "opencode",
+    "codex",
+    "antigravity",
+    "web-scraping"
+  ],
+  "author": "webclaw",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xMassi/webclaw"
+  },
+  "homepage": "https://webclaw.io",
+  "engines": {
+    "node": ">=18"
+  }
+}
