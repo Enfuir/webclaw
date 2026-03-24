@@ -15,6 +15,7 @@
   <a href="https://github.com/0xMassi/webclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-212529?style=flat-square" alt="License" /></a>
   <a href="https://www.npmjs.com/package/create-webclaw"><img src="https://img.shields.io/npm/v/create-webclaw?style=flat-square&label=npx%20create-webclaw&color=212529" alt="npm" /></a>
   <a href="https://github.com/0xMassi/webclaw/stargazers"><img src="https://img.shields.io/github/stars/0xMassi/webclaw?style=flat-square&color=212529" alt="Stars" /></a>
+  <a href="https://discord.gg/KDfd48EpnW"><img src="https://img.shields.io/badge/discord-join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
 ---
@@ -350,6 +351,11 @@ go get github.com/0xMassi/webclaw-go      # Go
 - **Brand intelligence** — Extract visual identity from any website
 
 ---
+
+## Community
+
+- [Discord](https://discord.gg/KDfd48EpnW) — questions, feedback, show what you built
+- [GitHub Issues](https://github.com/0xMassi/webclaw/issues) — bug reports and feature requests
 
 ## Contributing
 
