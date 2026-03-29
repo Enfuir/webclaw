@@ -1,5 +1,5 @@
-/// Browser fingerprint selection and rotation.
-/// Maps our BrowserProfile enum to webclaw-http client builder methods.
+//! Browser fingerprint selection and rotation.
+//! Maps our BrowserProfile enum to webclaw-http client builder methods.
 
 /// Which browser identity to present at the TLS/HTTP layer.
 #[derive(Debug, Clone, Default)]
