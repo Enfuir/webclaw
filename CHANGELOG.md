@@ -3,6 +3,15 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1] — 2026-03-30
+
+### Added
+- **Cookie warmup fallback**: when a fetch returns an Akamai challenge page, automatically visits the homepage first to collect `_abck`/`bm_sz` cookies, then retries the original URL. Enables extraction of Akamai-protected subpages (e.g. fansale ticket pages) without JS rendering.
+
+### Changed
+- Upgraded to webclaw-tls v0.1.2: fixed HTTP header wire order (accept/user-agent were in wrong positions) and added H2 PRIORITY flag in HEADERS frames.
+- `FetchResult.headers` now uses `http::HeaderMap` instead of `HashMap<String, String>` — avoids per-response allocation, preserves multi-value headers.
+
 ## [0.3.0] — 2026-03-29
 
 ### Changed

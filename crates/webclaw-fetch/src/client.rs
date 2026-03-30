@@ -556,9 +556,9 @@ fn is_challenge_response(response: &webclaw_http::Response) -> bool {
 
 /// Extract the homepage URL (scheme + host) from a full URL.
 fn extract_homepage(url: &str) -> Option<String> {
-    url::Url::parse(url).ok().map(|u| {
-        format!("{}://{}/", u.scheme(), u.host_str().unwrap_or(""))
-    })
+    url::Url::parse(url)
+        .ok()
+        .map(|u| format!("{}://{}/", u.scheme(), u.host_str().unwrap_or("")))
 }
 
 /// Convert a webclaw-pdf PdfResult into a webclaw-core ExtractionResult.
