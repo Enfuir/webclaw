@@ -139,19 +139,33 @@ impl WebclawMcp {
         let exclude = params.exclude_selectors.unwrap_or_default();
         let main_only = params.only_main_content.unwrap_or(false);
 
-        // Use a custom client if a non-default browser is requested
+        // Build cookie header from params
+        let cookie_header = params
+            .cookies
+            .as_ref()
+            .filter(|c| !c.is_empty())
+            .map(|c| c.join("; "));
+
+        // Use a custom client if non-default browser or cookies are provided
         let is_default_browser = matches!(browser, webclaw_fetch::BrowserProfile::Chrome);
+        let needs_custom = !is_default_browser || cookie_header.is_some();
         let custom_client;
-        let client: &webclaw_fetch::FetchClient = if is_default_browser {
-            &self.fetch_client
-        } else {
+        let client: &webclaw_fetch::FetchClient = if needs_custom {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("Accept-Language".to_string(), "en-US,en;q=0.9".to_string());
+            if let Some(ref cookies) = cookie_header {
+                headers.insert("Cookie".to_string(), cookies.clone());
+            }
             let config = webclaw_fetch::FetchConfig {
                 browser,
+                headers,
                 ..Default::default()
             };
             custom_client = webclaw_fetch::FetchClient::new(config)
                 .map_err(|e| format!("Failed to build client: {e}"))?;
             &custom_client
+        } else {
+            &self.fetch_client
         };
 
         let formats = [format];

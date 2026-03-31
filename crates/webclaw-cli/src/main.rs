@@ -151,6 +151,10 @@ struct Cli {
     #[arg(long)]
     cookie: Option<String>,
 
+    /// JSON cookie file (Chrome extension format: [{name, value, domain, ...}])
+    #[arg(long)]
+    cookie_file: Option<String>,
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -371,6 +375,24 @@ fn build_fetch_config(cli: &Cli) -> FetchConfig {
         headers.insert("Cookie".to_string(), cookie.clone());
     }
 
+    // --cookie-file: parse JSON array of {name, value, domain, ...}
+    if let Some(ref path) = cli.cookie_file {
+        match parse_cookie_file(path) {
+            Ok(cookie_str) => {
+                // Merge with existing cookies if --cookie was also provided
+                if let Some(existing) = headers.get("Cookie") {
+                    headers.insert("Cookie".to_string(), format!("{existing}; {cookie_str}"));
+                } else {
+                    headers.insert("Cookie".to_string(), cookie_str);
+                }
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse cookie file: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
     FetchConfig {
         browser: cli.browser.clone().into(),
         proxy,
@@ -380,6 +402,29 @@ fn build_fetch_config(cli: &Cli) -> FetchConfig {
         headers,
         ..Default::default()
     }
+}
+
+/// Parse a JSON cookie file (Chrome extension format) into a Cookie header string.
+/// Supports: [{name, value, domain, path, secure, httpOnly, expirationDate, ...}]
+fn parse_cookie_file(path: &str) -> Result<String, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let cookies: Vec<serde_json::Value> =
+        serde_json::from_str(&content).map_err(|e| format!("invalid JSON: {e}"))?;
+
+    let pairs: Vec<String> = cookies
+        .iter()
+        .filter_map(|c| {
+            let name = c.get("name")?.as_str()?;
+            let value = c.get("value")?.as_str()?;
+            Some(format!("{name}={value}"))
+        })
+        .collect();
+
+    if pairs.is_empty() {
+        return Err("no cookies found in file".to_string());
+    }
+
+    Ok(pairs.join("; "))
 }
 
 fn build_extraction_options(cli: &Cli) -> ExtractionOptions {

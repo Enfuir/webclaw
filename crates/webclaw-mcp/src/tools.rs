@@ -18,6 +18,8 @@ pub struct ScrapeParams {
     pub only_main_content: Option<bool>,
     /// Browser profile: "chrome" (default), "firefox", or "random"
     pub browser: Option<String>,
+    /// Cookies to send with the request (e.g. ["name=value", "session=abc123"])
+    pub cookies: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
