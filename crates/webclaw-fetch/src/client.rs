@@ -93,15 +93,33 @@ impl Response {
         let status = resp.status().as_u16();
         let url = resp.uri().to_string();
         let headers = resp.headers().clone();
-        let body = resp.bytes().await.map_err(|e| FetchError::BodyDecode(e.to_string()))?;
-        Ok(Self { status, url, headers, body })
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| FetchError::BodyDecode(e.to_string()))?;
+        Ok(Self {
+            status,
+            url,
+            headers,
+            body,
+        })
     }
 
-    fn status(&self) -> u16 { self.status }
-    fn url(&self) -> &str { &self.url }
-    fn headers(&self) -> &http::HeaderMap { &self.headers }
-    fn body(&self) -> &[u8] { &self.body }
-    fn is_success(&self) -> bool { (200..300).contains(&self.status) }
+    fn status(&self) -> u16 {
+        self.status
+    }
+    fn url(&self) -> &str {
+        &self.url
+    }
+    fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+    fn body(&self) -> &[u8] {
+        &self.body
+    }
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
 
     fn text(&self) -> std::borrow::Cow<'_, str> {
         String::from_utf8_lossy(&self.body)
@@ -147,7 +165,12 @@ impl FetchClient {
             let clients = variants
                 .into_iter()
                 .map(|v| {
-                    crate::tls::build_client(v, config.timeout, &config.headers, config.proxy.as_deref())
+                    crate::tls::build_client(
+                        v,
+                        config.timeout,
+                        &config.headers,
+                        config.proxy.as_deref(),
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -454,10 +477,7 @@ fn collect_variants(profile: &BrowserProfile) -> Vec<BrowserVariant> {
 }
 
 /// Convert a buffered Response into a FetchResult.
-fn response_to_result(
-    response: Response,
-    start: Instant,
-) -> Result<FetchResult, FetchError> {
+fn response_to_result(response: Response, start: Instant) -> Result<FetchResult, FetchError> {
     let status = response.status();
     let final_url = response.url().to_string();
     let headers = response.headers().clone();
