@@ -179,8 +179,9 @@ pub fn extract_with_options(
     let domain_type = domain::detect(url, html);
     let domain_data = Some(DomainData { domain_type });
 
-    // JSON-LD structured data (Schema.org Product, Article, etc.)
-    let structured_data = structured_data::extract_json_ld(html);
+    // Structured data: JSON-LD + SvelteKit data islands
+    let mut structured_data = structured_data::extract_json_ld(html);
+    structured_data.extend(structured_data::extract_sveltekit(html));
 
     Ok(ExtractionResult {
         metadata: meta,

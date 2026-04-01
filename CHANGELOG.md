@@ -3,6 +3,16 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.4] — 2026-04-01
+
+### Added
+- **SvelteKit data island extraction**: extracts structured JSON from `kit.start()` data arrays. Handles unquoted JS object keys by converting to valid JSON before parsing. Data appears in the `structured_data` field.
+
+### Changed
+- **License changed from MIT to AGPL-3.0**.
+
+---
+
 ## [0.3.3] — 2026-04-01
 
 ### Changed

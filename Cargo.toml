@@ -3,9 +3,9 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0"
 repository = "https://github.com/0xMassi/webclaw"
 
 [workspace.dependencies]

@@ -28,6 +28,8 @@ struct TextChunk {
 
 /// Try to extract content from JSON data islands when DOM extraction is sparse.
 /// Deduplicates against existing markdown so we only add genuinely new content.
+/// Handles: application/json script tags, SvelteKit kit.start() data, and
+/// other inline JS data patterns.
 pub fn try_extract(doc: &Html, dom_word_count: usize, existing_markdown: &str) -> Option<String> {
     if dom_word_count >= SPARSE_THRESHOLD {
         return None;
@@ -36,6 +38,7 @@ pub fn try_extract(doc: &Html, dom_word_count: usize, existing_markdown: &str) -
     let mut all_chunks: Vec<TextChunk> = Vec::new();
     let existing_lower = existing_markdown.to_lowercase();
 
+    // 1. Standard JSON data islands (application/json script tags)
     for script in doc.select(&SCRIPT_JSON_SELECTOR) {
         if all_chunks.len() >= MAX_CHUNKS {
             break;
@@ -63,6 +66,9 @@ pub fn try_extract(doc: &Html, dom_word_count: usize, existing_markdown: &str) -
             all_chunks.extend(chunks);
         }
     }
+
+    // Note: SvelteKit data islands are handled in structured_data.rs
+    // (extracted as structured JSON, not markdown chunks)
 
     if all_chunks.is_empty() {
         return None;
