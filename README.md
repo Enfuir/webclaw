@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/0xMassi/webclaw/stargazers"><img src="https://img.shields.io/github/stars/0xMassi/webclaw?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=181717" alt="Stars" /></a>
   <a href="https://github.com/0xMassi/webclaw/releases"><img src="https://img.shields.io/github/v/release/0xMassi/webclaw?style=for-the-badge&logo=rust&logoColor=white&label=Version&color=B7410E" alt="Version" /></a>
-  <a href="https://github.com/0xMassi/webclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge" alt="License" /></a>
+  <a href="https://github.com/0xMassi/webclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-10B981?style=for-the-badge" alt="License" /></a>
   <a href="https://www.npmjs.com/package/create-webclaw"><img src="https://img.shields.io/npm/dt/create-webclaw?style=for-the-badge&logo=npm&logoColor=white&label=Installs&color=CB3837" alt="npm installs" /></a>
 </p>
 <p align="center">
@@ -397,4 +397,4 @@ TLS and HTTP/2 browser fingerprinting is powered by [wreq](https://github.com/0x
 
 ## License
 
-[MIT](LICENSE) — use it however you want.
+[AGPL-3.0](LICENSE)
