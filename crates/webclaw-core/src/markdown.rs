@@ -526,10 +526,10 @@ fn cell_has_block_content(cell: ElementRef<'_>) -> bool {
         "aside",
     ];
     for desc in cell.descendants() {
-        if let Some(el) = ElementRef::wrap(desc) {
-            if BLOCK_TAGS.contains(&el.value().name()) {
-                return true;
-            }
+        if let Some(el) = ElementRef::wrap(desc)
+            && BLOCK_TAGS.contains(&el.value().name())
+        {
+            return true;
         }
     }
     false
@@ -560,14 +560,13 @@ fn table_to_md(
                         !exclude.contains(&c.id())
                             && (c.value().name() == "th" || c.value().name() == "td")
                     })
-                    .map(|c| {
+                    .inspect(|&c| {
                         if c.value().name() == "th" {
                             has_header = true;
                         }
                         if !is_layout && cell_has_block_content(c) {
                             is_layout = true;
                         }
-                        c
                     })
                     .collect();
 
