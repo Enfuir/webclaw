@@ -210,10 +210,7 @@ impl FetchClient {
     /// with exponential backoff: 0s, 1s (2 attempts total).
     #[instrument(skip(self), fields(url = %url))]
     pub async fn fetch(&self, url: &str) -> Result<FetchResult, FetchError> {
-        let delays = [
-            Duration::ZERO,
-            Duration::from_secs(1),
-        ];
+        let delays = [Duration::ZERO, Duration::from_secs(1)];
         let mut last_err = None;
 
         for (attempt, delay) in delays.iter().enumerate() {
