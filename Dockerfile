@@ -58,5 +58,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/webclaw /usr/local/bin/webclaw
 COPY --from=builder /build/target/release/webclaw-mcp /usr/local/bin/webclaw-mcp
 
-# Default: run the CLI
-CMD ["webclaw"]
+# Default: run the CLI (ENTRYPOINT so args pass through)
+ENTRYPOINT ["webclaw"]

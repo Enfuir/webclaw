@@ -3,6 +3,13 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.13] — 2026-04-10
+
+### Fixed
+- **Docker CMD replaced with ENTRYPOINT**: both `Dockerfile` and `Dockerfile.ci` now use `ENTRYPOINT ["webclaw"]` instead of `CMD ["webclaw"]`. CLI arguments (e.g. `docker run webclaw https://example.com`) now pass through correctly instead of being ignored.
+
+---
+
 ## [0.3.12] — 2026-04-10
 
 ### Added

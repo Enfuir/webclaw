@@ -13,4 +13,4 @@ ARG BINARY_DIR
 COPY ${BINARY_DIR}/webclaw /usr/local/bin/webclaw
 COPY ${BINARY_DIR}/webclaw-mcp /usr/local/bin/webclaw-mcp
 
-CMD ["webclaw"]
+ENTRYPOINT ["webclaw"]
