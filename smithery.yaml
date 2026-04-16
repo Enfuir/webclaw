@@ -1,0 +1,24 @@
+# Smithery configuration — https://smithery.ai/docs/build/project-config
+# webclaw MCP server: web extraction for AI agents with bot-protection bypass
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      apiKey:
+        type: string
+        description: >
+          webclaw API key from webclaw.io. Optional — the server works
+          locally without one. Set this for automatic fallback to the
+          webclaw cloud API when a site has bot protection or requires
+          JS rendering.
+        secret: true
+  commandFunction: |
+    (config) => ({
+      command: 'webclaw-mcp',
+      args: [],
+      env: config.apiKey ? { WEBCLAW_API_KEY: config.apiKey } : {}
+    })
+  exampleConfig:
+    apiKey: wc_your_api_key_here

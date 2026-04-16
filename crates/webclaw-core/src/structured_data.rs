@@ -52,8 +52,14 @@ pub fn extract_json_ld(html: &str) -> Vec<Value> {
             continue;
         }
 
-        // Parse — some sites have arrays at top level
-        match serde_json::from_str::<Value>(json_str) {
+        // Try parsing as-is first, then retry with sanitized newlines.
+        // Many sites (e.g. Bluesky) emit JSON-LD with raw newlines inside
+        // string values which is technically invalid JSON.
+        let parsed = serde_json::from_str::<Value>(json_str).or_else(|_| {
+            let sanitized = sanitize_json_newlines(json_str);
+            serde_json::from_str::<Value>(&sanitized)
+        });
+        match parsed {
             Ok(Value::Array(arr)) => results.extend(arr),
             Ok(val) => results.push(val),
             Err(_) => {}
@@ -237,6 +243,45 @@ fn js_literal_to_json(input: &str) -> String {
     out
 }
 
+/// Replace raw newlines/tabs inside JSON string values with escape sequences.
+/// Walks the input tracking whether we're inside a quoted string; any literal
+/// control character found inside quotes is replaced with its `\n`/`\t`/`\r`
+/// escape. Characters outside strings are left untouched.
+fn sanitize_json_newlines(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for ch in input.chars() {
+        if escape_next {
+            out.push(ch);
+            escape_next = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            out.push(ch);
+            escape_next = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            out.push(ch);
+            continue;
+        }
+        if in_string {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                _ => out.push(ch),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 /// Extract content between balanced brackets, handling string escaping.
 fn extract_balanced(text: &str, open: u8, close: u8) -> Option<String> {
     if text.as_bytes().first()? != &open {
@@ -373,5 +418,26 @@ mod tests {
         "#;
         let results = extract_json_ld(html);
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn handles_raw_newlines_in_json_ld() {
+        let html = "<script type=\"application/ld+json\">{\"@type\":\"ProfilePage\",\"mainEntity\":{\"name\":\"Jay\",\"description\":\"Founder @ Bluesky\n\nWorking on stuff\n🌱\"}}</script>";
+        let results = extract_json_ld(html);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["@type"], "ProfilePage");
+        let desc = results[0]["mainEntity"]["description"].as_str().unwrap();
+        assert!(desc.contains("Founder"));
+        assert!(desc.contains("Working on stuff"));
+    }
+
+    #[test]
+    fn sanitize_preserves_valid_escapes() {
+        let input = r#"{"text":"line1\nline2","raw":"has
+newline"}"#;
+        let sanitized = sanitize_json_newlines(input);
+        let parsed: Value = serde_json::from_str(&sanitized).unwrap();
+        assert_eq!(parsed["text"], "line1\nline2");
+        assert_eq!(parsed["raw"], "has\nnewline");
     }
 }
