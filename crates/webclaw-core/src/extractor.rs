@@ -888,8 +888,7 @@ mod tests {
         // function must walk the whole string rejecting each one. With the
         // `+1` bug this panicked the first time `search_from` crossed a
         // 2-byte char. With the fix it should return None cleanly.
-        let markdown =
-            "Наша история ![foo needle bar](a.png) Ещё текст ![needle](b.png) Конец 'Ч'";
+        let markdown = "Наша история ![foo needle bar](a.png) Ещё текст ![needle](b.png) Конец 'Ч'";
         assert_eq!(find_content_position(markdown, "needle"), None);
     }
 
