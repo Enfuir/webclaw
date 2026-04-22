@@ -18,6 +18,7 @@ pub mod arxiv;
 pub mod crates_io;
 pub mod dev_to;
 pub mod docker_hub;
+pub mod ecommerce_product;
 pub mod github_pr;
 pub mod github_release;
 pub mod github_repo;
@@ -30,7 +31,15 @@ pub mod linkedin_post;
 pub mod npm;
 pub mod pypi;
 pub mod reddit;
+pub mod shopify_product;
 pub mod stackoverflow;
+// `trustpilot_reviews` code lives in the tree but is not wired into the
+// catalog or dispatch: Cloudflare turnstile blocks our client at the TLS
+// layer (all browser profiles tried, all UAs, mobile + desktop). Shipping
+// it would return 403 more often than not — bad UX. When the cloud tier
+// has residential proxies or a CDP renderer, flip this back on.
+#[allow(dead_code)]
+pub mod trustpilot_reviews;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -73,6 +82,8 @@ pub fn list() -> Vec<ExtractorInfo> {
         linkedin_post::INFO,
         instagram_post::INFO,
         instagram_profile::INFO,
+        shopify_product::INFO,
+        ecommerce_product::INFO,
     ]
 }
 
@@ -198,6 +209,12 @@ pub async fn dispatch_by_url(
                 .map(|v| (instagram_profile::INFO.name, v)),
         );
     }
+    // NOTE: shopify_product and ecommerce_product are intentionally NOT
+    // in auto-dispatch. Their `matches()` functions are permissive
+    // (any URL with `/products/`, `/product/`, `/p/`, etc.) and
+    // claiming those generically would steal URLs from the default
+    // `/v1/scrape` markdown flow. Callers opt in via
+    // `/v1/scrape/shopify_product` or `/v1/scrape/ecommerce_product`.
     None
 }
 
@@ -301,6 +318,18 @@ pub async fn dispatch_by_name(
         n if n == instagram_profile::INFO.name => {
             run_or_mismatch(instagram_profile::matches(url), n, url, || {
                 instagram_profile::extract(client, url)
+            })
+            .await
+        }
+        n if n == shopify_product::INFO.name => {
+            run_or_mismatch(shopify_product::matches(url), n, url, || {
+                shopify_product::extract(client, url)
+            })
+            .await
+        }
+        n if n == ecommerce_product::INFO.name => {
+            run_or_mismatch(ecommerce_product::matches(url), n, url, || {
+                ecommerce_product::extract(client, url)
             })
             .await
         }
