@@ -7,7 +7,7 @@
 //! BigCommerce, WooCommerce, Squarespace, Magento, custom storefronts,
 //! and anything else that follows Schema.org.
 //!
-//! **Explicit-call only** — `/v1/scrape/ecommerce_product`. Not in the
+//! **Explicit-call only** (`/v1/scrape/ecommerce_product`). Not in the
 //! auto-dispatch because we can't identify "this is a product page"
 //! from the URL alone. When the caller knows they have a product URL,
 //! this is the reliable fallback for stores where shopify_product
@@ -17,7 +17,28 @@
 //! so JSON-LD parsing is shared with the rest of the extraction
 //! pipeline. We walk all blocks looking for `@type: Product`,
 //! `ProductGroup`, or an `ItemList` whose first entry is a Product.
+//!
+//! ## OG fallback
+//!
+//! Two real-world cases JSON-LD alone can't cover:
+//!
+//! 1. Site has no Product JSON-LD at all (smaller Squarespace / custom
+//!    storefronts, many European shops).
+//! 2. Site has Product JSON-LD but the `offers` block is empty (seen on
+//!    Patagonia and other catalog-style sites that split price onto a
+//!    separate widget).
+//!
+//! For case 1 we build a minimal payload from OG / product meta tags
+//! (`og:title`, `og:image`, `og:description`, `product:price:amount`,
+//! `product:price:currency`, `product:availability`, `product:brand`).
+//! For case 2 we augment the JSON-LD offers list with an OG-derived
+//! offer so callers get a price either way. A `data_source` field
+//! (`"jsonld"` / `"jsonld+og"` / `"og_fallback"`) tells the caller
+//! which branch produced the data.
 
+use std::sync::OnceLock;
+
+use regex::Regex;
 use serde_json::{Value, json};
 
 use super::ExtractorInfo;
@@ -56,38 +77,104 @@ pub async fn extract(client: &FetchClient, url: &str) -> Result<Value, FetchErro
             resp.status
         )));
     }
+    parse(&resp.html, url).ok_or_else(|| {
+        FetchError::BodyDecode(format!(
+            "ecommerce_product: no Schema.org Product JSON-LD and no OG product tags on {url}"
+        ))
+    })
+}
 
+/// Pure parser: try JSON-LD first, fall back to OG meta tags. Returns
+/// `None` when neither path has enough to say "this is a product page".
+pub fn parse(html: &str, url: &str) -> Option<Value> {
     // Reuse the core JSON-LD parser so we benefit from whatever
     // robustness it gains over time (handling @graph, arrays, etc.).
-    let blocks = webclaw_core::structured_data::extract_json_ld(&resp.html);
-    let product = find_product(&blocks).ok_or_else(|| {
-        FetchError::BodyDecode(format!(
-            "ecommerce_product: no Schema.org Product found in JSON-LD on {url}"
-        ))
-    })?;
+    let blocks = webclaw_core::structured_data::extract_json_ld(html);
+    let product = find_product(&blocks);
 
-    Ok(json!({
+    if let Some(p) = product {
+        Some(build_jsonld_payload(&p, html, url))
+    } else if has_og_product_signal(html) {
+        Some(build_og_payload(html, url))
+    } else {
+        None
+    }
+}
+
+/// Build the rich payload from a Product JSON-LD node. Augments the
+/// `offers` array with an OG-derived offer when JSON-LD offers is empty
+/// so callers get a price on sites like Patagonia.
+fn build_jsonld_payload(product: &Value, html: &str, url: &str) -> Value {
+    let mut offers = collect_offers(product);
+    let mut data_source = "jsonld";
+    if offers.is_empty()
+        && let Some(og_offer) = build_og_offer(html)
+    {
+        offers.push(og_offer);
+        data_source = "jsonld+og";
+    }
+
+    json!({
         "url":                url,
-        "name":               get_text(&product, "name"),
-        "description":        get_text(&product, "description"),
-        "brand":              get_brand(&product),
-        "sku":                get_text(&product, "sku"),
-        "mpn":                get_text(&product, "mpn"),
-        "gtin":               get_text(&product, "gtin")
-                                 .or_else(|| get_text(&product, "gtin13"))
-                                 .or_else(|| get_text(&product, "gtin12"))
-                                 .or_else(|| get_text(&product, "gtin8")),
-        "product_id":         get_text(&product, "productID"),
-        "category":           get_text(&product, "category"),
-        "color":              get_text(&product, "color"),
-        "material":           get_text(&product, "material"),
-        "images":             collect_images(&product),
-        "offers":             collect_offers(&product),
-        "aggregate_rating":   get_aggregate_rating(&product),
-        "review_count":       get_review_count(&product),
-        "raw_schema_type":    get_text(&product, "@type"),
-        "raw_jsonld":         product,
-    }))
+        "data_source":        data_source,
+        "name":               get_text(product, "name").or_else(|| og(html, "title")),
+        "description":        get_text(product, "description").or_else(|| og(html, "description")),
+        "brand":              get_brand(product).or_else(|| meta_property(html, "product:brand")),
+        "sku":                get_text(product, "sku"),
+        "mpn":                get_text(product, "mpn"),
+        "gtin":               get_text(product, "gtin")
+                                 .or_else(|| get_text(product, "gtin13"))
+                                 .or_else(|| get_text(product, "gtin12"))
+                                 .or_else(|| get_text(product, "gtin8")),
+        "product_id":         get_text(product, "productID"),
+        "category":           get_text(product, "category"),
+        "color":              get_text(product, "color"),
+        "material":           get_text(product, "material"),
+        "images":             nonempty_or_og(collect_images(product), html),
+        "offers":             offers,
+        "aggregate_rating":   get_aggregate_rating(product),
+        "review_count":       get_review_count(product),
+        "raw_schema_type":    get_text(product, "@type"),
+        "raw_jsonld":         product.clone(),
+    })
+}
+
+/// Build a minimal payload from OG / product meta tags. Used when a
+/// page has no Product JSON-LD at all.
+fn build_og_payload(html: &str, url: &str) -> Value {
+    let offers = build_og_offer(html).map(|o| vec![o]).unwrap_or_default();
+    let image = og(html, "image");
+    let images: Vec<Value> = image.map(|i| vec![Value::String(i)]).unwrap_or_default();
+
+    json!({
+        "url":                url,
+        "data_source":        "og_fallback",
+        "name":               og(html, "title"),
+        "description":        og(html, "description"),
+        "brand":              meta_property(html, "product:brand"),
+        "sku":                None::<String>,
+        "mpn":                None::<String>,
+        "gtin":               None::<String>,
+        "product_id":         None::<String>,
+        "category":           None::<String>,
+        "color":              None::<String>,
+        "material":           None::<String>,
+        "images":             images,
+        "offers":             offers,
+        "aggregate_rating":   Value::Null,
+        "review_count":       None::<String>,
+        "raw_schema_type":    None::<String>,
+        "raw_jsonld":         Value::Null,
+    })
+}
+
+fn nonempty_or_og(imgs: Vec<Value>, html: &str) -> Vec<Value> {
+    if !imgs.is_empty() {
+        return imgs;
+    }
+    og(html, "image")
+        .map(|s| vec![Value::String(s)])
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +323,81 @@ fn host_of(url: &str) -> &str {
         .unwrap_or("")
 }
 
+// ---------------------------------------------------------------------------
+// OG / product meta-tag helpers
+// ---------------------------------------------------------------------------
+
+/// True when the HTML has enough OG / product meta tags to justify
+/// building a fallback payload. A single `og:title` isn't enough on its
+/// own — every blog post has that. We require either a product price
+/// tag or at least an `og:type` of `product`/`og:product` to avoid
+/// mis-classifying articles as products.
+fn has_og_product_signal(html: &str) -> bool {
+    let has_price = meta_property(html, "product:price:amount").is_some()
+        || meta_property(html, "og:price:amount").is_some();
+    if has_price {
+        return true;
+    }
+    // `<meta property="og:type" content="product">` is the Schema.org OG
+    // marker for product pages.
+    let og_type = og(html, "type").unwrap_or_default().to_lowercase();
+    matches!(og_type.as_str(), "product" | "og:product" | "product.item")
+}
+
+/// Build a single Offer-shaped Value from OG / product meta tags, or
+/// `None` if there's no price info at all.
+fn build_og_offer(html: &str) -> Option<Value> {
+    let price = meta_property(html, "product:price:amount")
+        .or_else(|| meta_property(html, "og:price:amount"));
+    let currency = meta_property(html, "product:price:currency")
+        .or_else(|| meta_property(html, "og:price:currency"));
+    let availability = meta_property(html, "product:availability")
+        .or_else(|| meta_property(html, "og:availability"));
+    price.as_ref()?;
+    Some(json!({
+        "price":            price,
+        "low_price":        None::<String>,
+        "high_price":       None::<String>,
+        "currency":         currency,
+        "availability":     availability,
+        "item_condition":   None::<String>,
+        "valid_until":      None::<String>,
+        "url":              None::<String>,
+        "seller":           None::<String>,
+        "offer_count":      None::<String>,
+    }))
+}
+
+/// Pull the value of `<meta property="og:{prop}" content="...">`.
+fn og(html: &str, prop: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?i)<meta[^>]+property="og:([a-z_]+)"[^>]+content="([^"]+)""#).unwrap()
+    });
+    for c in re.captures_iter(html) {
+        if c.get(1).is_some_and(|m| m.as_str() == prop) {
+            return c.get(2).map(|m| m.as_str().to_string());
+        }
+    }
+    None
+}
+
+/// Pull the value of any `<meta property="..." content="...">` tag.
+/// Needed for namespaced OG variants like `product:price:amount` that
+/// the simple `og:*` matcher above doesn't cover.
+fn meta_property(html: &str, prop: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?i)<meta[^>]+property="([^"]+)"[^>]+content="([^"]+)""#).unwrap()
+    });
+    for c in re.captures_iter(html) {
+        if c.get(1).is_some_and(|m| m.as_str() == prop) {
+            return c.get(2).map(|m| m.as_str().to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +472,82 @@ mod tests {
             offers[0].get("availability").and_then(|v| v.as_str()),
             Some("InStock")
         );
+    }
+
+    // --- OG fallback --------------------------------------------------------
+
+    #[test]
+    fn has_og_product_signal_accepts_product_type_or_price() {
+        let type_only = r#"<meta property="og:type" content="product">"#;
+        let price_only = r#"<meta property="product:price:amount" content="49.00">"#;
+        let neither = r#"<meta property="og:title" content="My Article"><meta property="og:type" content="article">"#;
+        assert!(has_og_product_signal(type_only));
+        assert!(has_og_product_signal(price_only));
+        assert!(!has_og_product_signal(neither));
+    }
+
+    #[test]
+    fn og_fallback_builds_payload_without_jsonld() {
+        let html = r##"<html><head>
+            <meta property="og:type" content="product">
+            <meta property="og:title" content="Handmade Candle">
+            <meta property="og:image" content="https://cdn.example.com/candle.jpg">
+            <meta property="og:description" content="Small-batch soy candle.">
+            <meta property="product:price:amount" content="18.00">
+            <meta property="product:price:currency" content="USD">
+            <meta property="product:availability" content="in stock">
+            <meta property="product:brand" content="Little Studio">
+        </head></html>"##;
+        let v = parse(html, "https://example.com/p/candle").unwrap();
+        assert_eq!(v["data_source"], "og_fallback");
+        assert_eq!(v["name"], "Handmade Candle");
+        assert_eq!(v["description"], "Small-batch soy candle.");
+        assert_eq!(v["brand"], "Little Studio");
+        assert_eq!(v["offers"][0]["price"], "18.00");
+        assert_eq!(v["offers"][0]["currency"], "USD");
+        assert_eq!(v["offers"][0]["availability"], "in stock");
+        assert_eq!(v["images"][0], "https://cdn.example.com/candle.jpg");
+    }
+
+    #[test]
+    fn jsonld_augments_empty_offers_with_og_price() {
+        // Patagonia-shaped page: Product JSON-LD without an Offer, plus
+        // product:price:* OG tags. We should merge.
+        let html = r##"<html><head>
+            <script type="application/ld+json">
+            {"@context":"https://schema.org","@type":"Product",
+             "name":"Better Sweater","brand":"Patagonia",
+             "aggregateRating":{"@type":"AggregateRating","ratingValue":"4.4","reviewCount":"1142"}}
+            </script>
+            <meta property="product:price:amount" content="139.00">
+            <meta property="product:price:currency" content="USD">
+        </head></html>"##;
+        let v = parse(html, "https://patagonia.com/p/x").unwrap();
+        assert_eq!(v["data_source"], "jsonld+og");
+        assert_eq!(v["name"], "Better Sweater");
+        assert_eq!(v["offers"].as_array().unwrap().len(), 1);
+        assert_eq!(v["offers"][0]["price"], "139.00");
+    }
+
+    #[test]
+    fn jsonld_only_stays_pure_jsonld() {
+        let html = r##"<html><head>
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Widget",
+             "offers":{"@type":"Offer","price":"9.99","priceCurrency":"USD"}}
+            </script>
+        </head></html>"##;
+        let v = parse(html, "https://example.com/p/w").unwrap();
+        assert_eq!(v["data_source"], "jsonld");
+        assert_eq!(v["offers"][0]["price"], "9.99");
+    }
+
+    #[test]
+    fn parse_returns_none_on_no_product_signals() {
+        let html = r#"<html><head>
+            <meta property="og:title" content="My Blog Post">
+            <meta property="og:type" content="article">
+        </head></html>"#;
+        assert!(parse(html, "https://blog.example.com/post").is_none());
     }
 }

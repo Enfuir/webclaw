@@ -325,6 +325,18 @@ pub fn is_bot_protected(html: &str, headers: &HeaderMap) -> bool {
         return true;
     }
 
+    // AWS WAF "Verifying your connection" interstitial (used by Trustpilot).
+    // Distinct from the captcha-branded path above: the challenge page is
+    // a tiny HTML shell with an `interstitial-spinner` div and no content.
+    // Gating on html.len() keeps false-positives off long pages that
+    // happen to mention the phrase in an unrelated context.
+    if html_lower.contains("interstitial-spinner")
+        && html_lower.contains("verifying your connection")
+        && html.len() < 10_000
+    {
+        return true;
+    }
+
     // hCaptcha *blocking* page (not just an embedded widget).
     if html_lower.contains("hcaptcha.com")
         && html_lower.contains("h-captcha")
@@ -560,6 +572,26 @@ mod tests {
         let html = format!(
             "<html><body>{}<div class=\"cf-turnstile\"></div></body></html>",
             "lots of real content ".repeat(8_000)
+        );
+        assert!(!is_bot_protected(&html, &empty_headers()));
+    }
+
+    #[test]
+    fn is_bot_protected_detects_aws_waf_verifying_connection() {
+        // The exact shape Trustpilot serves under AWS WAF.
+        let html = r#"<div class="container"><div id="loading-state">
+            <div class="interstitial-spinner" id="spinner"></div>
+            <h1>Verifying your connection...</h1></div></div>"#;
+        assert!(is_bot_protected(html, &empty_headers()));
+    }
+
+    #[test]
+    fn is_bot_protected_ignores_phrase_on_real_content() {
+        // A real article that happens to mention the phrase in prose
+        // should not trigger the short-page detector.
+        let html = format!(
+            "<html><body>{}<p>Verifying your connection is tricky.</p></body></html>",
+            "article text ".repeat(2_000)
         );
         assert!(!is_bot_protected(&html, &empty_headers()));
     }
