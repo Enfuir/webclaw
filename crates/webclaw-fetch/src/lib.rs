@@ -6,6 +6,7 @@ pub mod client;
 pub mod crawler;
 pub mod document;
 pub mod error;
+pub mod extractors;
 pub mod linkedin;
 pub mod proxy;
 pub mod reddit;

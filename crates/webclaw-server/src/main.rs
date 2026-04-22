@@ -79,10 +79,15 @@ async fn main() -> anyhow::Result<()> {
 
     let v1 = Router::new()
         .route("/scrape", post(routes::scrape::scrape))
+        .route(
+            "/scrape/{vertical}",
+            post(routes::structured::scrape_vertical),
+        )
         .route("/crawl", post(routes::crawl::crawl))
         .route("/map", post(routes::map::map))
         .route("/batch", post(routes::batch::batch))
         .route("/extract", post(routes::extract::extract))
+        .route("/extractors", get(routes::structured::list_extractors))
         .route("/summarize", post(routes::summarize::summarize_route))
         .route("/diff", post(routes::diff::diff_route))
         .route("/brand", post(routes::brand::brand))

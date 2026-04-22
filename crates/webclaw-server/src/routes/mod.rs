@@ -15,4 +15,5 @@ pub mod extract;
 pub mod health;
 pub mod map;
 pub mod scrape;
+pub mod structured;
 pub mod summarize;
