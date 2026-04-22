@@ -1,5 +1,12 @@
 # webclaw — Multi-stage Docker build
-# Produces 2 binaries: webclaw (CLI) and webclaw-mcp (MCP server)
+# Produces 3 binaries:
+#   webclaw         — CLI (single-shot extraction, crawl, MCP-less use)
+#   webclaw-mcp     — MCP server (stdio, for AI agents)
+#   webclaw-server  — minimal REST API for self-hosting (OSS, stateless)
+#
+# NOTE: this is NOT the hosted API at api.webclaw.io — the cloud service
+# adds anti-bot bypass, JS rendering, multi-tenant auth and async jobs
+# that are intentionally not open-source. See docs/self-hosting.
 
 # ---------------------------------------------------------------------------
 # Stage 1: Build all binaries in release mode
@@ -25,6 +32,7 @@ COPY crates/webclaw-llm/Cargo.toml crates/webclaw-llm/Cargo.toml
 COPY crates/webclaw-pdf/Cargo.toml crates/webclaw-pdf/Cargo.toml
 COPY crates/webclaw-mcp/Cargo.toml crates/webclaw-mcp/Cargo.toml
 COPY crates/webclaw-cli/Cargo.toml crates/webclaw-cli/Cargo.toml
+COPY crates/webclaw-server/Cargo.toml crates/webclaw-server/Cargo.toml
 
 # Copy .cargo config if present (optional build flags)
 COPY .cargo .cargo
@@ -35,7 +43,8 @@ RUN mkdir -p crates/webclaw-core/src && echo "" > crates/webclaw-core/src/lib.rs
     && mkdir -p crates/webclaw-llm/src && echo "" > crates/webclaw-llm/src/lib.rs \
     && mkdir -p crates/webclaw-pdf/src && echo "" > crates/webclaw-pdf/src/lib.rs \
     && mkdir -p crates/webclaw-mcp/src && echo "fn main() {}" > crates/webclaw-mcp/src/main.rs \
-    && mkdir -p crates/webclaw-cli/src && echo "fn main() {}" > crates/webclaw-cli/src/main.rs
+    && mkdir -p crates/webclaw-cli/src && echo "fn main() {}" > crates/webclaw-cli/src/main.rs \
+    && mkdir -p crates/webclaw-server/src && echo "fn main() {}" > crates/webclaw-server/src/main.rs
 
 # Pre-build dependencies (this layer is cached until Cargo.toml/lock changes)
 RUN cargo build --release 2>/dev/null || true
@@ -54,9 +63,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy both binaries
+# Copy all three binaries
 COPY --from=builder /build/target/release/webclaw /usr/local/bin/webclaw
 COPY --from=builder /build/target/release/webclaw-mcp /usr/local/bin/webclaw-mcp
+COPY --from=builder /build/target/release/webclaw-server /usr/local/bin/webclaw-server
+
+# Default port the REST API listens on when you run `webclaw-server` inside
+# the container. Override with -e WEBCLAW_PORT=... or --port. Published only
+# as documentation; callers still need `-p 3000:3000` on `docker run`.
+EXPOSE 3000
+
+# Container default: bind all interfaces so `-p 3000:3000` works. The binary
+# itself defaults to 127.0.0.1 (safe for `cargo run` on a laptop); inside
+# Docker that would make the server unreachable, so we flip it here.
+# Override with -e WEBCLAW_HOST=127.0.0.1 if you front this with another
+# process in the same container.
+ENV WEBCLAW_HOST=0.0.0.0
 
 # Entrypoint shim: forwards webclaw args/URL to the binary, but exec's other
 # commands directly so this image can be used as a FROM base with custom CMD.

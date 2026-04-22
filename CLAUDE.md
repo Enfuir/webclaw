@@ -20,9 +20,11 @@ webclaw/
     webclaw-pdf/      # PDF text extraction via pdf-extract
     webclaw-mcp/      # MCP server (Model Context Protocol) for AI agents
     webclaw-cli/      # CLI binary
+    webclaw-server/   # Minimal axum REST API (self-hosting; OSS counterpart
+                      # of api.webclaw.io, without anti-bot / JS / jobs / auth)
 ```
 
-Two binaries: `webclaw` (CLI), `webclaw-mcp` (MCP server).
+Three binaries: `webclaw` (CLI), `webclaw-mcp` (MCP server), `webclaw-server` (REST API for self-hosting).
 
 ### Core Modules (`webclaw-core`)
 - `extractor.rs` — Readability-style scoring: text density, semantic tags, link density penalty
@@ -59,6 +61,17 @@ Two binaries: `webclaw` (CLI), `webclaw-mcp` (MCP server).
 - 8 tools: scrape, crawl, map, batch, extract, summarize, diff, brand
 - Works with Claude Desktop, Claude Code, and any MCP client
 - Uses `rmcp` crate (official Rust MCP SDK)
+
+### REST API Server (`webclaw-server`)
+- Axum 0.8, stateless, no database, no job queue
+- 8 POST routes + /health, JSON shapes mirror api.webclaw.io where the
+  capability exists in OSS
+- Constant-time bearer-token auth via `subtle::ConstantTimeEq` when
+  `--api-key` / `WEBCLAW_API_KEY` is set; otherwise open mode
+- Hard caps: crawl ≤ 500 pages, batch ≤ 100 URLs, 20 concurrent
+- Does NOT include: anti-bot bypass, JS rendering, async jobs,
+  multi-tenant auth, billing, proxy rotation, search/research/watch/
+  agent-scrape. Those live behind api.webclaw.io and are closed-source.
 
 ## Hard Rules
 

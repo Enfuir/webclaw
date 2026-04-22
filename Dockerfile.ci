@@ -12,6 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG BINARY_DIR
 COPY ${BINARY_DIR}/webclaw /usr/local/bin/webclaw
 COPY ${BINARY_DIR}/webclaw-mcp /usr/local/bin/webclaw-mcp
+COPY ${BINARY_DIR}/webclaw-server /usr/local/bin/webclaw-server
+
+# Default REST API port when running `webclaw-server` inside the container.
+EXPOSE 3000
+
+# Container default: bind all interfaces so `-p 3000:3000` works. The
+# binary itself defaults to 127.0.0.1; flipping here keeps the CLI safe on
+# a laptop but makes the container reachable out of the box.
+ENV WEBCLAW_HOST=0.0.0.0
 
 # Entrypoint shim: forwards webclaw args/URL to the binary, but exec's other
 # commands directly so this image can be used as a FROM base with custom CMD.

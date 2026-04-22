@@ -3,6 +3,28 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-04-22
+
+### Added
+- **`webclaw bench <url>` — per-URL extraction micro-benchmark (#26).** New subcommand. Fetches a URL once, runs the same extraction pipeline as `--format llm`, and prints a small ASCII table comparing raw-HTML tokens vs. llm-output tokens, bytes, and extraction time. Pass `--json` for a single-line JSON object (stable shape, easy to append to ndjson in CI). Pass `--facts <path>` with a file in the same schema as `benchmarks/facts.json` to get a fidelity column ("4/5 facts preserved"); URLs absent from the facts file produce no fidelity row, so uncurated sites aren't shown as 0/0. v1 uses an approximate tokenizer (`chars/4` for Latin text, `chars/2` when CJK dominates) — off by ±10% vs. a real BPE tokenizer, but the signal ("the LLM pipeline dropped 93% of the raw bytes") is the point. Output clearly labels counts as `≈ tokens` so nobody confuses them with a real tiktoken run. Swapping in `tiktoken-rs` later is a one-function change in `bench.rs`. Adding this as a `clap` subcommand rather than a flag also lays the groundwork for future subcommands without breaking the existing flag-based flow — `webclaw <url> --format llm` still works exactly as before.
+
+- **`webclaw-server` — new OSS binary for self-hosting a REST API (#29).** Until now, `docs/self-hosting` promised a `webclaw-server` binary that only existed in the hosted-platform repo (closed source). The Docker image shipped two binaries while the docs advertised three, which sent self-hosters into a bug loop. This release closes the gap: a new crate at `crates/webclaw-server/` builds a minimal, stateless axum server that exposes the OSS extraction pipeline over HTTP with the same JSON shapes as api.webclaw.io. Endpoints: `GET /health`, `POST /v1/{scrape,crawl,map,batch,extract,summarize,diff,brand}`. Run with `webclaw-server --port 3000 [--host 0.0.0.0] [--api-key <bearer>]` or the matching `WEBCLAW_PORT` / `WEBCLAW_HOST` / `WEBCLAW_API_KEY` env vars. Bearer auth is constant-time (via `subtle::ConstantTimeEq`); open mode (no key) is allowed on `127.0.0.1` for local development.
+
+  What self-hosting gives you: the full extraction pipeline, Crawler, sitemap discovery, brand/diff, LLM extract/summarize (via Ollama or your own OpenAI/Anthropic key). What it does *not* give you: anti-bot bypass (Cloudflare, DataDome, WAFs), headless JS rendering, async job queues, multi-tenant auth/billing, domain-hints and proxy routing — those require the hosted backend at api.webclaw.io and are intentionally not open-source. The self-hosting docs have been updated to reflect this split honestly.
+
+- **`crawl` endpoint runs synchronously and hard-caps at 500 pages / 20 concurrency.** No job queue, no background workers — a naive caller can't OOM the process. `batch` caps at 100 URLs / 20 concurrency for the same reason. For unbounded crawls use the hosted API.
+
+### Changed
+- **Docker image now ships three binaries**, not two. `Dockerfile` and `Dockerfile.ci` both add `webclaw-server` to `/usr/local/bin/` and `EXPOSE 3000` for documentation. The entrypoint shim is unchanged: `docker run IMAGE webclaw-server --port 3000` Just Works, and the CLI/URL pass-through from v0.3.19 is preserved.
+
+### Docs
+- Rewrote `docs/self-hosting` on the landing site to differentiate OSS (self-hosted REST) from the hosted platform. Added a capability matrix so new users don't have to read the repo to figure out why Cloudflare-protected sites still 403 when pointing at their own box.
+
+### Fixed
+- **Dead-code warning on `cargo install webclaw-mcp` (#30).** `rmcp` 1.3.x changed how the `#[tool_handler]` macro reads the `tool_router` struct field — it now goes through a derived trait impl instead of referencing the field by name, so rustc's dead-code lint no longer sees it. The field is still essential (dropping it unregisters every MCP tool), just invisible to the lint. Annotated with `#[allow(dead_code)]` and a comment explaining why. No behaviour change. Warning disappears on the next `cargo install`.
+
+---
+
 ## [0.3.19] — 2026-04-17
 
 ### Fixed

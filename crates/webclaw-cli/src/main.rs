@@ -1,5 +1,6 @@
 /// CLI entry point -- wires webclaw-core and webclaw-fetch into a single command.
 /// All extraction and fetching logic lives in sibling crates; this is pure plumbing.
+mod bench;
 mod cloud;
 
 use std::io::{self, Read as _};
@@ -8,7 +9,7 @@ use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 use webclaw_core::{
     ChangeStatus, ContentDiff, ExtractionOptions, ExtractionResult, Metadata, extract_with_options,
@@ -86,6 +87,12 @@ fn warn_empty(url: &str, reason: &EmptyReason) {
 #[derive(Parser)]
 #[command(name = "webclaw", about = "Extract web content for LLMs", version)]
 struct Cli {
+    /// Optional subcommand. When omitted, the CLI falls back to the
+    /// traditional flag-based flow (URL + --format, --crawl, etc.).
+    /// Subcommands are used for flows that don't fit that model.
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// URLs to fetch (multiple allowed)
     #[arg()]
     urls: Vec<String>,
@@ -281,6 +288,27 @@ struct Cli {
     /// Filenames are derived from URL paths (e.g. /docs/api -> docs/api.md).
     #[arg(long)]
     output_dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Per-URL extraction micro-benchmark: compares raw HTML vs. the
+    /// webclaw --format llm output on token count, bytes, and
+    /// extraction time. Uses an approximate tokenizer (see `--help`).
+    Bench {
+        /// URL to benchmark.
+        url: String,
+
+        /// Emit a single JSON line instead of the ASCII table.
+        /// Machine-readable shape stable across releases.
+        #[arg(long)]
+        json: bool,
+
+        /// Optional path to a facts.json (same schema as the repo's
+        /// benchmarks/facts.json) for a fidelity column.
+        #[arg(long)]
+        facts: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -2243,6 +2271,26 @@ async fn main() {
 
     let cli = Cli::parse();
     init_logging(cli.verbose);
+
+    // Subcommand path. Handled before the flag dispatch so a subcommand
+    // can't collide with a flag-based flow. When no subcommand is set
+    // we fall through to the existing behaviour.
+    if let Some(ref cmd) = cli.command {
+        match cmd {
+            Commands::Bench { url, json, facts } => {
+                let args = bench::BenchArgs {
+                    url: url.clone(),
+                    json: *json,
+                    facts: facts.clone(),
+                };
+                if let Err(e) = bench::run(&args).await {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+                return;
+            }
+        }
+    }
 
     // --map: sitemap discovery mode
     if cli.map {
