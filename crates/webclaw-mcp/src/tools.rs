@@ -103,3 +103,20 @@ pub struct SearchParams {
     /// Number of results to return (default: 10)
     pub num_results: Option<u32>,
 }
+
+/// Parameters for `vertical_scrape`: run a site-specific extractor by name.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VerticalParams {
+    /// Name of the vertical extractor. Call `list_extractors` to see all
+    /// available names. Examples: "reddit", "github_repo", "pypi",
+    /// "trustpilot_reviews", "youtube_video", "shopify_product".
+    pub name: String,
+    /// URL to extract. Must match the URL patterns the extractor claims;
+    /// otherwise the tool returns a clear "URL mismatch" error.
+    pub url: String,
+}
+
+/// `list_extractors` takes no arguments but we still need an empty struct
+/// so rmcp can generate a schema and parse the (empty) JSON-RPC params.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListExtractorsParams {}

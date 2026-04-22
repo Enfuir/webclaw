@@ -308,6 +308,34 @@ enum Commands {
         #[arg(long)]
         facts: Option<PathBuf>,
     },
+
+    /// List all vertical extractors in the catalog.
+    ///
+    /// Each entry has a stable `name` (usable with `webclaw vertical <name>`),
+    /// a human-friendly label, a one-line description, and the URL
+    /// patterns it claims. The same data is served by `/v1/extractors`
+    /// when running the REST API.
+    Extractors {
+        /// Emit JSON instead of a human-friendly table.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run a vertical extractor by name. Returns typed JSON with fields
+    /// specific to the target site (title, price, author, rating, etc.)
+    /// rather than generic markdown.
+    ///
+    /// Use `webclaw extractors` to see the full list. Example:
+    /// `webclaw vertical reddit https://www.reddit.com/r/rust/comments/abc/`.
+    Vertical {
+        /// Vertical name (e.g. `reddit`, `github_repo`, `trustpilot_reviews`).
+        name: String,
+        /// URL to extract.
+        url: String,
+        /// Emit compact JSON (single line). Default is pretty-printed.
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -2285,6 +2313,83 @@ async fn main() {
                 if let Err(e) = bench::run(&args).await {
                     eprintln!("error: {e}");
                     process::exit(1);
+                }
+                return;
+            }
+            Commands::Extractors { json } => {
+                let entries = webclaw_fetch::extractors::list();
+                if *json {
+                    // Serialize with serde_json. ExtractorInfo derives
+                    // Serialize so this is a one-liner.
+                    match serde_json::to_string_pretty(&entries) {
+                        Ok(s) => println!("{s}"),
+                        Err(e) => {
+                            eprintln!("error: failed to serialise catalog: {e}");
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    // Human-friendly table: NAME + LABEL + one URL
+                    // pattern sample. Keeps the output scannable on a
+                    // narrow terminal.
+                    println!("{} vertical extractors available:\n", entries.len());
+                    let name_w = entries.iter().map(|e| e.name.len()).max().unwrap_or(0);
+                    let label_w = entries.iter().map(|e| e.label.len()).max().unwrap_or(0);
+                    for e in &entries {
+                        let pattern_sample = e.url_patterns.first().copied().unwrap_or("");
+                        println!(
+                            "  {:<nw$}  {:<lw$}  {}",
+                            e.name,
+                            e.label,
+                            pattern_sample,
+                            nw = name_w,
+                            lw = label_w,
+                        );
+                    }
+                    println!("\nRun one: webclaw vertical <name> <url>");
+                }
+                return;
+            }
+            Commands::Vertical { name, url, raw } => {
+                // Build a FetchClient with cloud fallback attached when
+                // WEBCLAW_API_KEY is set. Antibot-gated verticals
+                // (amazon, ebay, etsy, trustpilot) need this to escalate
+                // on bot protection.
+                let fetch_cfg = webclaw_fetch::FetchConfig {
+                    browser: webclaw_fetch::BrowserProfile::Firefox,
+                    ..webclaw_fetch::FetchConfig::default()
+                };
+                let mut client = match webclaw_fetch::FetchClient::new(fetch_cfg) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("error: failed to build fetch client: {e}");
+                        process::exit(1);
+                    }
+                };
+                if let Some(cloud) = webclaw_fetch::cloud::CloudClient::from_env() {
+                    client = client.with_cloud(cloud);
+                }
+                match webclaw_fetch::extractors::dispatch_by_name(&client, name, url).await {
+                    Ok(data) => {
+                        let rendered = if *raw {
+                            serde_json::to_string(&data)
+                        } else {
+                            serde_json::to_string_pretty(&data)
+                        };
+                        match rendered {
+                            Ok(s) => println!("{s}"),
+                            Err(e) => {
+                                eprintln!("error: JSON encode failed: {e}");
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // UrlMismatch / UnknownVertical / Fetch all get
+                        // Display impls with actionable messages.
+                        eprintln!("error: {e}");
+                        process::exit(1);
+                    }
                 }
                 return;
             }

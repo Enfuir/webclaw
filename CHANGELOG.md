@@ -3,6 +3,20 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.2] — 2026-04-22
+
+### Added
+- **`webclaw vertical <name> <url>` subcommand on the CLI.** Runs a specific vertical extractor and prints typed JSON (pretty-printed by default, `--raw` for single-line). Example: `webclaw vertical reddit https://www.reddit.com/r/rust/comments/abc/` returns `{post: {title, author, points, ...}, comments: [...]}`. URL-mismatch errors surface cleanly as `"URL '...' does not match the '...' extractor"` on stderr with exit code 1.
+
+- **`webclaw extractors` subcommand on the CLI.** Lists all 28 vertical extractors with name, label, and one URL pattern sample. `--json` emits the full catalog as JSON (same shape as `GET /v1/extractors`) for tooling. Covers discovery for users who don't know which vertical to pick.
+
+- **`vertical_scrape` and `list_extractors` tools on `webclaw-mcp`.** Claude Desktop / Claude Code users can now call any of the 28 extractors by name from an MCP session. Tool count goes from 10 to 12. `list_extractors` takes no args and returns the full catalog; `vertical_scrape` takes `{name, url}` and returns the typed JSON payload. Antibot-gated verticals still auto-escalate to the webclaw cloud API when `WEBCLAW_API_KEY` is set.
+
+### Changed
+- Server-info instruction string in `webclaw-mcp` now lists all 12 tools (previously hard-coded 10). Also `webclaw --help` on the CLI now shows the three subcommands: `bench`, `extractors`, `vertical`.
+
+---
+
 ## [0.5.1] — 2026-04-22
 
 ### Added

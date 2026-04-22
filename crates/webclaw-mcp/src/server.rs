@@ -718,6 +718,50 @@ impl WebclawMcp {
             Ok(serde_json::to_string_pretty(&resp).unwrap_or_default())
         }
     }
+
+    /// List every vertical extractor the server knows about. Returns a
+    /// JSON array of `{name, label, description, url_patterns}` entries.
+    /// Call this to discover what verticals are available before using
+    /// `vertical_scrape`.
+    #[tool]
+    async fn list_extractors(
+        &self,
+        Parameters(_params): Parameters<ListExtractorsParams>,
+    ) -> Result<String, String> {
+        let catalog = webclaw_fetch::extractors::list();
+        serde_json::to_string_pretty(&catalog)
+            .map_err(|e| format!("failed to serialise extractor catalog: {e}"))
+    }
+
+    /// Run a vertical extractor by name and return typed JSON specific
+    /// to the target site (title, price, rating, author, etc.), not
+    /// generic markdown. Use `list_extractors` to discover available
+    /// names. Example names: `reddit`, `github_repo`, `trustpilot_reviews`,
+    /// `youtube_video`, `shopify_product`, `pypi`, `npm`, `arxiv`.
+    ///
+    /// Antibot-gated verticals (amazon_product, ebay_listing,
+    /// etsy_listing, trustpilot_reviews) will automatically escalate to
+    /// the webclaw cloud API when local fetch hits bot protection,
+    /// provided `WEBCLAW_API_KEY` is set.
+    #[tool]
+    async fn vertical_scrape(
+        &self,
+        Parameters(params): Parameters<VerticalParams>,
+    ) -> Result<String, String> {
+        validate_url(&params.url)?;
+        // Reuse the long-lived default FetchClient. Extractors accept
+        // `&dyn Fetcher`; FetchClient implements the trait so this just
+        // works (see webclaw_fetch::Fetcher and client::FetchClient).
+        let data = webclaw_fetch::extractors::dispatch_by_name(
+            self.fetch_client.as_ref(),
+            &params.name,
+            &params.url,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&data)
+            .map_err(|e| format!("failed to serialise extractor output: {e}"))
+    }
 }
 
 #[tool_handler]
@@ -727,7 +771,8 @@ impl ServerHandler for WebclawMcp {
             .with_server_info(Implementation::new("webclaw-mcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(String::from(
                 "Webclaw MCP server -- web content extraction for AI agents. \
-                 Tools: scrape, crawl, map, batch, extract, summarize, diff, brand, research, search.",
+                 Tools: scrape, crawl, map, batch, extract, summarize, diff, brand, research, search, \
+                 list_extractors, vertical_scrape.",
             ))
     }
 }
