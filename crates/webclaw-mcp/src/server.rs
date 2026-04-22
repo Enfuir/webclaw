@@ -749,16 +749,21 @@ impl WebclawMcp {
         Parameters(params): Parameters<VerticalParams>,
     ) -> Result<String, String> {
         validate_url(&params.url)?;
-        // Reuse the long-lived default FetchClient. Extractors accept
-        // `&dyn Fetcher`; FetchClient implements the trait so this just
-        // works (see webclaw_fetch::Fetcher and client::FetchClient).
-        let data = webclaw_fetch::extractors::dispatch_by_name(
-            self.fetch_client.as_ref(),
-            &params.name,
-            &params.url,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        // Use the cached Firefox client, not the default Chrome one.
+        // Reddit's `.json` endpoint rejects the wreq-Chrome TLS
+        // fingerprint with a 403 even from residential IPs (they
+        // ship a fingerprint blocklist that includes common
+        // browser-emulation libraries). The wreq-Firefox fingerprint
+        // still passes, and Firefox is equally fine for every other
+        // vertical in the catalog, so it's a strictly-safer default
+        // for `vertical_scrape` than the generic `scrape` tool's
+        // Chrome default. Matches the CLI `webclaw vertical`
+        // subcommand which already uses Firefox.
+        let client = self.firefox_or_build()?;
+        let data =
+            webclaw_fetch::extractors::dispatch_by_name(client.as_ref(), &params.name, &params.url)
+                .await
+                .map_err(|e| e.to_string())?;
         serde_json::to_string_pretty(&data)
             .map_err(|e| format!("failed to serialise extractor output: {e}"))
     }
