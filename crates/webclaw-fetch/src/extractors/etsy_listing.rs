@@ -10,6 +10,15 @@
 //! but some listings return a CF interstitial. We route through
 //! `cloud::smart_fetch_html` so both paths resolve to the same parser,
 //! same as `ebay_listing`.
+//!
+//! ## URL slug as last-resort title
+//!
+//! Even with cloud antibot bypass, Etsy frequently serves a generic
+//! page with minimal metadata (`og:title = "etsy.com"`, no JSON-LD,
+//! empty markdown). In that case we humanise the slug from the URL
+//! (`/listing/{id}/personalized-stainless-steel-tumbler` becomes
+//! "Personalized Stainless Steel Tumbler") so callers always get a
+//! meaningful title. Degrades gracefully when the URL has no slug.
 
 use std::sync::OnceLock;
 
@@ -63,15 +72,17 @@ pub async fn extract(client: &FetchClient, url: &str) -> Result<Value, FetchErro
 
 pub fn parse(html: &str, url: &str, listing_id: &str) -> Value {
     let jsonld = find_product_jsonld(html);
+    let slug_title = humanise_slug(parse_slug(url).as_deref());
 
     let title = jsonld
         .as_ref()
         .and_then(|v| get_text(v, "name"))
-        .or_else(|| og(html, "title"));
+        .or_else(|| og(html, "title").filter(|t| !is_generic_title(t)))
+        .or(slug_title);
     let description = jsonld
         .as_ref()
         .and_then(|v| get_text(v, "description"))
-        .or_else(|| og(html, "description"));
+        .or_else(|| og(html, "description").filter(|d| !is_generic_description(d)));
     let image = jsonld
         .as_ref()
         .and_then(get_first_image)
@@ -98,13 +109,18 @@ pub fn parse(html: &str, url: &str, listing_id: &str) -> Value {
         .and_then(|v| get_text(v, "itemCondition"))
         .map(strip_schema_prefix);
 
-    // Shop name lives under offers[0].seller.name on Etsy.
-    let shop = offer.as_ref().and_then(|o| {
-        o.get("seller")
-            .and_then(|s| s.get("name"))
-            .and_then(|n| n.as_str())
-            .map(String::from)
-    });
+    // Shop name: offers[0].seller.name on newer listings, top-level
+    // `brand` on older listings (Etsy changed the schema around 2022).
+    // Fall back through both so either shape resolves.
+    let shop = offer
+        .as_ref()
+        .and_then(|o| {
+            o.get("seller")
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str())
+                .map(String::from)
+        })
+        .or_else(|| brand.clone());
     let shop_url = shop_url_from_html(html);
 
     let aggregate_rating = jsonld.as_ref().and_then(get_aggregate_rating);
@@ -156,6 +172,87 @@ fn parse_listing_id(url: &str) -> Option<String> {
     re.captures(url)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())
+}
+
+/// Extract the URL slug after the listing id, e.g.
+/// `personalized-stainless-steel-tumbler`. Returns `None` when the URL
+/// is the bare `/listing/{id}` shape.
+fn parse_slug(url: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"/listing/\d{6,}/([^/?#]+)").unwrap());
+    re.captures(url)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+/// Turn a URL slug into a human-ish title:
+/// `personalized-stainless-steel-tumbler` → `Personalized Stainless
+/// Steel Tumbler`. Word-cap each dash-separated token; preserves
+/// underscores as spaces too. Returns `None` on empty input.
+fn humanise_slug(slug: Option<&str>) -> Option<String> {
+    let raw = slug?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let words: Vec<String> = raw
+        .split(['-', '_'])
+        .filter(|w| !w.is_empty())
+        .map(capitalise_word)
+        .collect();
+    if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    }
+}
+
+fn capitalise_word(w: &str) -> String {
+    let mut chars = w.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// True when the OG title is Etsy's fallback-page title rather than a
+/// listing-specific title. Expired / region-blocked / antibot-filtered
+/// pages return Etsy's sitewide tagline:
+/// `"Etsy - Your place to buy and sell all things handmade..."`, or
+/// simply `"etsy.com"`. A real listing title always starts with the
+/// item name, never with "Etsy - " or the domain.
+fn is_generic_title(t: &str) -> bool {
+    let normalised = t.trim().to_lowercase();
+    if matches!(
+        normalised.as_str(),
+        "etsy.com" | "etsy" | "www.etsy.com" | ""
+    ) {
+        return true;
+    }
+    // Etsy's sitewide marketing tagline, served on 404 / blocked pages.
+    if normalised.starts_with("etsy - ")
+        || normalised.starts_with("etsy.com - ")
+        || normalised.starts_with("etsy uk - ")
+    {
+        return true;
+    }
+    // Etsy's "item unavailable" placeholder, served on delisted
+    // products. Keep the slug fallback so callers still see what the
+    // URL was about.
+    normalised.starts_with("this item is unavailable")
+        || normalised.starts_with("sorry, this item is")
+        || normalised == "item not available - etsy"
+}
+
+/// True when the OG description is an Etsy error-page placeholder or
+/// sitewide marketing blurb rather than a real listing description.
+fn is_generic_description(d: &str) -> bool {
+    let normalised = d.trim().to_lowercase();
+    if normalised.is_empty() {
+        return true;
+    }
+    normalised.starts_with("sorry, the page you were looking for")
+        || normalised.starts_with("page not found")
+        || normalised.starts_with("find the perfect handmade gift")
 }
 
 // ---------------------------------------------------------------------------
@@ -387,5 +484,89 @@ mod tests {
         assert_eq!(v["image"], "https://i.etsystatic.com/fallback.jpg");
         // No price fields when we only have OG.
         assert!(v["price"].is_null());
+    }
+
+    #[test]
+    fn parse_slug_from_url() {
+        assert_eq!(
+            parse_slug("https://www.etsy.com/listing/123456789/vintage-typewriter"),
+            Some("vintage-typewriter".into())
+        );
+        assert_eq!(
+            parse_slug("https://www.etsy.com/listing/123456789/slug?ref=shop"),
+            Some("slug".into())
+        );
+        assert_eq!(parse_slug("https://www.etsy.com/listing/123456789"), None);
+        assert_eq!(
+            parse_slug("https://www.etsy.com/fr/listing/123456789/slug"),
+            Some("slug".into())
+        );
+    }
+
+    #[test]
+    fn humanise_slug_capitalises_each_word() {
+        assert_eq!(
+            humanise_slug(Some("personalized-stainless-steel-tumbler")).as_deref(),
+            Some("Personalized Stainless Steel Tumbler")
+        );
+        assert_eq!(
+            humanise_slug(Some("hand_crafted_mug")).as_deref(),
+            Some("Hand Crafted Mug")
+        );
+        assert_eq!(humanise_slug(Some("")), None);
+        assert_eq!(humanise_slug(None), None);
+    }
+
+    #[test]
+    fn is_generic_title_catches_common_shapes() {
+        assert!(is_generic_title("etsy.com"));
+        assert!(is_generic_title("Etsy"));
+        assert!(is_generic_title("  etsy.com  "));
+        assert!(is_generic_title(
+            "Etsy - Your place to buy and sell all things handmade, vintage, and supplies"
+        ));
+        assert!(is_generic_title("Etsy UK - Vintage & Handmade"));
+        assert!(!is_generic_title("Vintage Typewriter"));
+        assert!(!is_generic_title("Handmade Etsy-style Mug"));
+    }
+
+    #[test]
+    fn is_generic_description_catches_404_shapes() {
+        assert!(is_generic_description(""));
+        assert!(is_generic_description(
+            "Sorry, the page you were looking for was not found."
+        ));
+        assert!(is_generic_description("Page not found"));
+        assert!(!is_generic_description(
+            "Hand-thrown ceramic mug, dishwasher safe."
+        ));
+    }
+
+    #[test]
+    fn parse_uses_slug_when_og_is_generic() {
+        // Cloud-blocked Etsy listing: og:title is a site-wide generic
+        // placeholder, no JSON-LD, no description. Slug should win.
+        let html = r#"<html><head>
+<meta property="og:title" content="etsy.com">
+</head></html>"#;
+        let v = parse(
+            html,
+            "https://www.etsy.com/listing/1079113183/personalized-stainless-steel-tumbler",
+            "1079113183",
+        );
+        assert_eq!(v["title"], "Personalized Stainless Steel Tumbler");
+    }
+
+    #[test]
+    fn parse_prefers_real_og_over_slug() {
+        let html = r#"<html><head>
+<meta property="og:title" content="Real Listing Title">
+</head></html>"#;
+        let v = parse(
+            html,
+            "https://www.etsy.com/listing/1079113183/the-url-slug",
+            "1079113183",
+        );
+        assert_eq!(v["title"], "Real Listing Title");
     }
 }

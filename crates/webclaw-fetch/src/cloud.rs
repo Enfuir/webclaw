@@ -24,6 +24,37 @@
 //!   parser on it. Returns the typed [`CloudError`] so extractors can
 //!   emit precise "upgrade your plan" / "invalid key" messages.
 //!
+//! ## Cloud response shape and [`synthesize_html`]
+//!
+//! `api.webclaw.io/v1/scrape` deliberately does **not** return a
+//! `html` field even when `formats=["html"]` is requested. By design
+//! the cloud API returns a parsed bundle:
+//!
+//! ```text
+//! {
+//!   "url":             "https://...",
+//!   "metadata":        { title, description, image, site_name, ... },  // OG / meta tags
+//!   "structured_data": [ { "@type": "...", ... }, ... ],               // JSON-LD blocks
+//!   "markdown":        "# Page Title\n\n...",                          // cleaned markdown
+//!   "antibot":         { engine, path, user_agent },                   // bypass telemetry
+//!   "cache":           { status, age_seconds }
+//! }
+//! ```
+//!
+//! [`CloudClient::fetch_html`] reassembles that bundle back into a
+//! minimal synthetic HTML document so the existing local extractor
+//! parsers (JSON-LD walkers, OG regex, DOM-regex) run unchanged over
+//! cloud output. Each `structured_data` entry becomes a
+//! `<script type="application/ld+json">` tag; each `metadata` field
+//! becomes a `<meta property="og:...">` tag; `markdown` lands in a
+//! `<pre>` inside the body. Callers that walk Schema.org blocks see
+//! exactly what they'd see on a real live page.
+//!
+//! Amazon-style DOM-regex fallbacks (`#productTitle`, `#landingImage`)
+//! won't hit on the synthesised HTML — those IDs only exist on live
+//! Amazon pages. Extractors that need DOM regex keep OG meta tag
+//! fallbacks for that reason.
+//!
 //! OSS users without `WEBCLAW_API_KEY` get a clear error pointing at
 //! signup when a site is blocked; nothing fails silently. Cloud users
 //! get the escalation for free.

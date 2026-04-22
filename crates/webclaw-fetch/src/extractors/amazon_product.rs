@@ -1,16 +1,25 @@
 //! Amazon product detail page extractor.
 //!
-//! Amazon product pages (`/dp/{ASIN}/` on every locale) always return
-//! a "Sorry, we need to verify you're human" interstitial to any
-//! client without a warm Amazon session + residential IP. Detection
-//! fires immediately in [`cloud::is_bot_protected`] via the dedicated
-//! Amazon heuristic, so this extractor always hits the cloud fallback
-//! path in practice.
+//! Amazon product pages (`/dp/{ASIN}/` on every locale) are
+//! inconsistently protected. Sometimes our local TLS fingerprint gets
+//! a real HTML page; sometimes we land on a CAPTCHA interstitial;
+//! sometimes we land on a real page that for whatever reason ships
+//! no Product JSON-LD (Amazon A/B-tests this regularly). So the
+//! extractor has a two-stage fallback:
 //!
-//! Parsing logic works on the final HTML, local or cloud-sourced. We
-//! read the product details primarily from JSON-LD `Product` blocks
-//! (Amazon exposes a solid subset for SEO) plus a couple of Amazon-
-//! specific DOM IDs picked up with cheap regex.
+//! 1. Try local fetch + parse. If we got Product JSON-LD back, great:
+//!    we have everything (title, brand, price, availability, rating).
+//! 2. If local fetch worked *but the page has no Product JSON-LD* AND
+//!    a cloud client is configured, force-escalate to api.webclaw.io.
+//!    Cloud's render + antibot pipeline reliably surfaces the
+//!    structured data. Without a cloud client we return whatever we
+//!    got from local (usually just title via `#productTitle` or OG
+//!    meta tags).
+//!
+//! Parsing tries JSON-LD first, DOM regex (`#productTitle`,
+//! `#landingImage`) second, OG `<meta>` tags third. The OG path
+//! matters because the cloud's synthesized HTML ships metadata as
+//! OG tags but lacks Amazon's DOM IDs.
 //!
 //! Auto-dispatch: we accept any amazon.* host with a `/dp/{ASIN}/`
 //! path. ASINs are a stable Amazon identifier so we extract that as
@@ -54,9 +63,35 @@ pub async fn extract(client: &FetchClient, url: &str) -> Result<Value, FetchErro
     let asin = parse_asin(url)
         .ok_or_else(|| FetchError::Build(format!("amazon_product: no ASIN in '{url}'")))?;
 
-    let fetched = cloud::smart_fetch_html(client, client.cloud(), url)
+    let mut fetched = cloud::smart_fetch_html(client, client.cloud(), url)
         .await
         .map_err(cloud_to_fetch_err)?;
+
+    // Amazon ships Product JSON-LD inconsistently even on non-CAPTCHA
+    // pages (they A/B-test it). When local fetch succeeded but has no
+    // Product JSON-LD, force-escalate to the cloud which runs the
+    // render pipeline and reliably surfaces structured data. No-op
+    // when cloud isn't configured — we return whatever local gave us.
+    if fetched.source == cloud::FetchSource::Local
+        && find_product_jsonld(&fetched.html).is_none()
+        && let Some(c) = client.cloud()
+    {
+        match c.fetch_html(url).await {
+            Ok(cloud_html) => {
+                fetched = cloud::FetchedHtml {
+                    html: cloud_html,
+                    final_url: url.to_string(),
+                    source: cloud::FetchSource::Cloud,
+                };
+            }
+            Err(e) => {
+                tracing::debug!(
+                    error = %e,
+                    "amazon_product: cloud escalation failed, keeping local"
+                );
+            }
+        }
+    }
 
     let mut data = parse(&fetched.html, url, &asin);
     if let Some(obj) = data.as_object_mut() {
@@ -77,16 +112,23 @@ pub async fn extract(client: &FetchClient, url: &str) -> Result<Value, FetchErro
 /// without carrying webclaw_fetch types.
 pub fn parse(html: &str, url: &str, asin: &str) -> Value {
     let jsonld = find_product_jsonld(html);
+    // Three-tier title: JSON-LD `name` > Amazon's `#productTitle` span
+    // (only present on real static HTML) > cloud-synthesized og:title.
     let title = jsonld
         .as_ref()
         .and_then(|v| get_text(v, "name"))
-        .or_else(|| dom_title(html));
+        .or_else(|| dom_title(html))
+        .or_else(|| og(html, "title"));
     let image = jsonld
         .as_ref()
         .and_then(get_first_image)
-        .or_else(|| dom_image(html));
+        .or_else(|| dom_image(html))
+        .or_else(|| og(html, "image"));
     let brand = jsonld.as_ref().and_then(get_brand);
-    let description = jsonld.as_ref().and_then(|v| get_text(v, "description"));
+    let description = jsonld
+        .as_ref()
+        .and_then(|v| get_text(v, "description"))
+        .or_else(|| og(html, "description"));
     let aggregate_rating = jsonld.as_ref().and_then(get_aggregate_rating);
     let offer = jsonld.as_ref().and_then(first_offer);
 
@@ -267,6 +309,31 @@ fn dom_image(html: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
+/// OG meta tag lookup. Cloud-synthesized HTML ships these even when
+/// JSON-LD and Amazon-DOM-IDs are both absent, so they're the last
+/// line of defence for `title`, `image`, `description`.
+fn og(html: &str, prop: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?i)<meta[^>]+property="og:([a-z_]+)"[^>]+content="([^"]+)""#).unwrap()
+    });
+    for c in re.captures_iter(html) {
+        if c.get(1).is_some_and(|m| m.as_str() == prop) {
+            return c.get(2).map(|m| html_unescape(m.as_str()));
+        }
+    }
+    None
+}
+
+/// Undo the synthesize_html attribute escaping for the few entities it
+/// emits. Keeps us off a heavier HTML-entity dep.
+fn html_unescape(s: &str) -> String {
+    s.replace("&quot;", "\"")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
 fn cloud_to_fetch_err(e: CloudError) -> FetchError {
     FetchError::Build(e.to_string())
 }
@@ -356,6 +423,30 @@ mod tests {
         assert_eq!(
             v["image"],
             "https://m.media-amazon.com/images/I/fallback.jpg"
+        );
+    }
+
+    #[test]
+    fn parse_falls_back_to_og_meta_when_no_jsonld_no_dom() {
+        // Shape we see from the cloud synthesize_html path: OG tags
+        // only, no JSON-LD, no Amazon DOM IDs.
+        let html = r##"<html><head>
+<meta property="og:title" content="Cloud-sourced MacBook Pro">
+<meta property="og:image" content="https://m.media-amazon.com/images/I/cloud.jpg">
+<meta property="og:description" content="Via api.webclaw.io">
+</head></html>"##;
+        let v = parse(html, "https://www.amazon.com/dp/B0CHX1W1XY", "B0CHX1W1XY");
+        assert_eq!(v["title"], "Cloud-sourced MacBook Pro");
+        assert_eq!(v["image"], "https://m.media-amazon.com/images/I/cloud.jpg");
+        assert_eq!(v["description"], "Via api.webclaw.io");
+    }
+
+    #[test]
+    fn og_unescape_handles_quot_entity() {
+        let html = r#"<meta property="og:title" content="Apple &quot;M2 Pro&quot; Laptop">"#;
+        assert_eq!(
+            og(html, "title").as_deref(),
+            Some(r#"Apple "M2 Pro" Laptop"#)
         );
     }
 }
