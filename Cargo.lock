@@ -3246,6 +3246,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "rand 0.8.5",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -3278,7 +3279,6 @@ version = "0.4.0"
 dependencies = [
  "dirs",
  "dotenvy",
- "reqwest",
  "rmcp",
  "schemars",
  "serde",

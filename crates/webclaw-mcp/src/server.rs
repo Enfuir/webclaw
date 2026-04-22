@@ -15,7 +15,8 @@ use serde_json::json;
 use tracing::{error, info, warn};
 use url::Url;
 
-use crate::cloud::{self, CloudClient, SmartFetchResult};
+use webclaw_fetch::cloud::{self, CloudClient, SmartFetchResult};
+
 use crate::tools::*;
 
 pub struct WebclawMcp {

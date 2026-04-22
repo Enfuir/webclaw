@@ -1,7 +1,6 @@
 /// webclaw-mcp: MCP (Model Context Protocol) server for webclaw.
 /// Exposes web extraction tools over stdio transport for AI agents
 /// like Claude Desktop, Claude Code, and other MCP clients.
-mod cloud;
 mod server;
 mod tools;
 

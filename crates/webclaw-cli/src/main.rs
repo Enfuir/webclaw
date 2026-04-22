@@ -1,7 +1,6 @@
 /// CLI entry point -- wires webclaw-core and webclaw-fetch into a single command.
 /// All extraction and fetching logic lives in sibling crates; this is pure plumbing.
 mod bench;
-mod cloud;
 
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
@@ -674,7 +673,7 @@ async fn fetch_and_extract(cli: &Cli) -> Result<FetchOutput, String> {
     let url = normalize_url(raw_url);
     let url = url.as_str();
 
-    let cloud_client = cloud::CloudClient::new(cli.api_key.as_deref());
+    let cloud_client = webclaw_fetch::cloud::CloudClient::new(cli.api_key.as_deref());
 
     // --cloud: skip local, go straight to cloud API
     if cli.cloud {

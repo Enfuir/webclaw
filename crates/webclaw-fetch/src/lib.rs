@@ -3,6 +3,7 @@
 //! Automatically detects PDF responses and delegates to webclaw-pdf.
 pub mod browser;
 pub mod client;
+pub mod cloud;
 pub mod crawler;
 pub mod document;
 pub mod error;
