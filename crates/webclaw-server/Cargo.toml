@@ -1,0 +1,29 @@
+[package]
+name = "webclaw-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal REST API server for self-hosting webclaw extraction. Wraps the OSS extraction crates with HTTP endpoints. NOT the production hosted API at api.webclaw.io — this is a stateless, single-binary reference server for local + self-hosted deployments."
+
+[[bin]]
+name = "webclaw-server"
+path = "src/main.rs"
+
+[dependencies]
+webclaw-core   = { workspace = true }
+webclaw-fetch  = { workspace = true }
+webclaw-llm    = { workspace = true }
+webclaw-pdf    = { workspace = true }
+
+axum           = { version = "0.8", features = ["macros"] }
+tokio          = { workspace = true }
+tower-http     = { version = "0.6", features = ["trace", "cors"] }
+clap           = { workspace = true, features = ["derive", "env"] }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+tracing        = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+anyhow         = "1"
+thiserror      = { workspace = true }
+subtle         = "2.6"
