@@ -26,7 +26,7 @@ impl AppState {
     /// state don't churn per request.
     pub fn new(api_key: Option<String>) -> anyhow::Result<Self> {
         let config = FetchConfig {
-            browser: BrowserProfile::Chrome,
+            browser: BrowserProfile::Firefox,
             ..FetchConfig::default()
         };
         let fetch = FetchClient::new(config)
