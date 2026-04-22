@@ -252,20 +252,91 @@ impl CloudClient {
         self.post("scrape", body).await
     }
 
-    /// Convenience: scrape with `formats: ["html"]` and pull out the
-    /// raw HTML string. Used by vertical extractors that want to run
-    /// their own parser on antibot-bypassed HTML.
+    /// Get antibot-bypassed page data back as a synthetic HTML string.
+    ///
+    /// `api.webclaw.io/v1/scrape` intentionally does not return raw
+    /// HTML: it returns pre-parsed `structured_data` (JSON-LD blocks)
+    /// plus `metadata` (title, description, OG tags, image) plus a
+    /// `markdown` body. We reassemble those into a minimal HTML doc
+    /// that looks enough like the real page for our local extractor
+    /// parsers to run unchanged: each JSON-LD block gets emitted as a
+    /// `<script type="application/ld+json">` tag, metadata gets
+    /// emitted as OG `<meta>` tags, and the markdown lands in the
+    /// body. Extractors that walk JSON-LD (ecommerce_product,
+    /// trustpilot_reviews, ebay_listing, etsy_listing, amazon_product)
+    /// see exactly the same shapes they'd see from a live HTML fetch.
     pub async fn fetch_html(&self, url: &str) -> Result<String, CloudError> {
-        let resp = self.scrape(url, &["html"], &[], &[], false).await?;
-        resp.get("html")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .ok_or_else(|| {
-                CloudError::ParseFailed(
-                    "cloud /v1/scrape returned no `html` field — check cloud API version".into(),
-                )
-            })
+        let resp = self.scrape(url, &["markdown"], &[], &[], false).await?;
+        Ok(synthesize_html(&resp))
     }
+}
+
+/// Reassemble a minimal HTML document from a cloud `/v1/scrape`
+/// response so existing HTML-based extractor parsers can run against
+/// cloud output without a separate code path.
+fn synthesize_html(resp: &Value) -> String {
+    let mut out = String::with_capacity(8_192);
+    out.push_str("<html><head>\n");
+
+    // Metadata → OG meta tags. Keep keys stable with what local
+    // extractors read: og:title, og:description, og:image, og:site_name.
+    if let Some(meta) = resp.get("metadata").and_then(|m| m.as_object()) {
+        for (src_key, og_key) in [
+            ("title", "title"),
+            ("description", "description"),
+            ("image", "image"),
+            ("site_name", "site_name"),
+        ] {
+            if let Some(val) = meta.get(src_key).and_then(|v| v.as_str())
+                && !val.is_empty()
+            {
+                out.push_str(&format!(
+                    "<meta property=\"og:{og_key}\" content=\"{}\">\n",
+                    html_escape_attr(val)
+                ));
+            }
+        }
+    }
+
+    // Structured data blocks → <script type="application/ld+json">.
+    // Serialise losslessly so extract_json_ld's parser gets the same
+    // shape it would get from a real page.
+    if let Some(blocks) = resp.get("structured_data").and_then(|v| v.as_array()) {
+        for block in blocks {
+            if let Ok(s) = serde_json::to_string(block) {
+                out.push_str("<script type=\"application/ld+json\">");
+                out.push_str(&s);
+                out.push_str("</script>\n");
+            }
+        }
+    }
+
+    out.push_str("</head><body>\n");
+
+    // Markdown body → plaintext in <body>. Extractors that regex over
+    // <div> IDs won't hit here, but they won't hit on local cloud
+    // bypass either. OK to keep minimal.
+    if let Some(md) = resp.get("markdown").and_then(|v| v.as_str()) {
+        out.push_str("<pre>");
+        out.push_str(&html_escape_text(md));
+        out.push_str("</pre>\n");
+    }
+
+    out.push_str("</body></html>");
+    out
+}
+
+fn html_escape_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn html_escape_text(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 async fn parse_cloud_response(resp: reqwest::Response) -> Result<Value, CloudError> {
@@ -583,6 +654,54 @@ mod tests {
             <div class="interstitial-spinner" id="spinner"></div>
             <h1>Verifying your connection...</h1></div></div>"#;
         assert!(is_bot_protected(html, &empty_headers()));
+    }
+
+    #[test]
+    fn synthesize_html_embeds_jsonld_and_og_tags() {
+        let resp = json!({
+            "url": "https://example.com/p/1",
+            "metadata": {
+                "title": "My Product",
+                "description": "A nice thing.",
+                "image": "https://cdn.example.com/1.jpg",
+                "site_name": "Example Shop"
+            },
+            "structured_data": [
+                {"@context":"https://schema.org","@type":"Product",
+                 "name":"Widget","offers":{"@type":"Offer","price":"9.99","priceCurrency":"USD"}}
+            ],
+            "markdown": "# Widget\n\nA nice widget."
+        });
+        let html = synthesize_html(&resp);
+        // OG tags from metadata.
+        assert!(html.contains(r#"<meta property="og:title" content="My Product">"#));
+        assert!(
+            html.contains(r#"<meta property="og:image" content="https://cdn.example.com/1.jpg">"#)
+        );
+        // JSON-LD block preserved losslessly.
+        assert!(html.contains(r#"<script type="application/ld+json">"#));
+        assert!(html.contains(r#""@type":"Product""#));
+        assert!(html.contains(r#""price":"9.99""#));
+        // Body carries markdown.
+        assert!(html.contains("A nice widget."));
+    }
+
+    #[test]
+    fn synthesize_html_handles_missing_fields_gracefully() {
+        let resp = json!({"url": "https://example.com", "metadata": {}});
+        let html = synthesize_html(&resp);
+        // No panic, no stray unclosed tags.
+        assert!(html.starts_with("<html><head>"));
+        assert!(html.ends_with("</body></html>"));
+    }
+
+    #[test]
+    fn synthesize_html_escapes_attribute_quotes() {
+        let resp = json!({
+            "metadata": {"title": r#"She said "hi""#}
+        });
+        let html = synthesize_html(&resp);
+        assert!(html.contains(r#"og:title" content="She said &quot;hi&quot;""#));
     }
 
     #[test]
