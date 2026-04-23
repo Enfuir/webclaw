@@ -920,8 +920,10 @@ fn strip_markdown(md: &str) -> String {
             continue;
         }
 
-        // Convert table data rows: strip leading/trailing pipes, replace inner pipes with tabs
-        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+        // Convert table data rows: strip leading/trailing pipes, replace inner pipes with tabs.
+        // Require at least 2 chars so the slice `[1..len-1]` stays non-empty on single-pipe rows
+        // (which aren't real tables anyway); a lone `|` previously panicked at `begin <= end`.
+        if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
             let inner = &trimmed[1..trimmed.len() - 1];
             let cells: Vec<&str> = inner.split('|').map(|c| c.trim()).collect();
             lines.push(cells.join("\t"));

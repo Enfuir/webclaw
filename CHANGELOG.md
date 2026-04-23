@@ -6,10 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.5.6] — 2026-04-23
 
 ### Added
-- `FetchClient::fetch_smart(url)` applies per-site rescue logic and returns the same `FetchResult` shape as `fetch()`. Reddit URLs route to the `.json` API, and Akamai-style challenge pages trigger a homepage cookie warmup plus a retry. Makes `/v1/scrape` on Reddit populate markdown again.
+- `FetchClient::fetch_smart(url)` applies per-site rescue logic and returns the same `FetchResult` shape as `fetch()`. Reddit URLs route to the `.json` API with an identifiable bot `User-Agent`, and Akamai-style challenge pages trigger a homepage cookie warmup plus a retry. Makes `/v1/scrape` on Reddit populate markdown again.
 
 ### Fixed
 - Regression introduced in 0.5.4 where the production server's `/v1/scrape` bypassed the Reddit `.json` shortcut and Akamai cookie warmup that `fetch_and_extract` had been providing. Both helpers now live in `fetch_smart` and every caller path picks them up.
+- Panic in the markdown converter (`markdown.rs:925`) on single-pipe `|` lines. A `[1..len-1]` slice on a 1-char input triggered `begin <= end`. Guarded.
 
 ---
 
