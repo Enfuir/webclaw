@@ -3,6 +3,13 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.5] — 2026-04-23
+
+### Added
+- `webclaw --browser safari-ios` on the CLI. Pairs with `--proxy` for DataDome-fronted sites that reject desktop profiles.
+
+---
+
 ## [0.5.4] — 2026-04-23
 
 ### Added

@@ -351,6 +351,9 @@ enum OutputFormat {
 enum Browser {
     Chrome,
     Firefox,
+    /// Safari iOS 26. Pair with a country-matched residential proxy for sites
+    /// that reject non-mobile profiles.
+    SafariIos,
     Random,
 }
 
@@ -377,6 +380,7 @@ impl From<Browser> for BrowserProfile {
         match b {
             Browser::Chrome => BrowserProfile::Chrome,
             Browser::Firefox => BrowserProfile::Firefox,
+            Browser::SafariIos => BrowserProfile::SafariIos,
             Browser::Random => BrowserProfile::Random,
         }
     }
