@@ -30,6 +30,7 @@ pub mod hackernews;
 pub mod huggingface_dataset;
 pub mod huggingface_model;
 pub mod instagram_post;
+pub mod twitter;
 pub mod instagram_profile;
 pub mod linkedin_post;
 pub mod npm;
@@ -87,6 +88,7 @@ pub fn list() -> Vec<ExtractorInfo> {
         linkedin_post::INFO,
         instagram_post::INFO,
         instagram_profile::INFO,
+        twitter::INFO,
         shopify_product::INFO,
         shopify_collection::INFO,
         ecommerce_product::INFO,
@@ -225,6 +227,13 @@ pub async fn dispatch_by_url(
             instagram_profile::extract(client, url)
                 .await
                 .map(|v| (instagram_profile::INFO.name, v)),
+        );
+    }
+    if twitter::matches(url) {
+        return Some(
+            twitter::extract(client, url)
+                .await
+                .map(|v| (twitter::INFO.name, v)),
         );
     }
     // Antibot-gated verticals with unique hosts: safe to auto-dispatch
@@ -382,6 +391,12 @@ pub async fn dispatch_by_name(
         n if n == instagram_profile::INFO.name => {
             run_or_mismatch(instagram_profile::matches(url), n, url, || {
                 instagram_profile::extract(client, url)
+            })
+            .await
+        }
+        n if n == twitter::INFO.name => {
+            run_or_mismatch(twitter::matches(url), n, url, || {
+                twitter::extract(client, url)
             })
             .await
         }
